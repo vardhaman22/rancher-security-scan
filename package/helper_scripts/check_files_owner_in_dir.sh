@@ -31,7 +31,12 @@ while read -r statInfoLine; do
       echo "false"
       exit
     fi
-  else
+  elif [[ $(basename "$f" .pem) == "kube-ca" ]]; then
+    if [[ "$p" != "root:root" && "$p" != "root:etcd" ]]; then
+      echo "false"
+      exit
+    fi
+  else 
     if [[ "$p" != "root:root" ]]; then
       echo "false"
       exit
