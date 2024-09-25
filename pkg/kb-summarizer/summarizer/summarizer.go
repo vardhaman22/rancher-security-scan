@@ -1,6 +1,9 @@
 package summarizer
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -121,6 +124,20 @@ type SummarizedReport struct {
 	NotApplicable int                   `json:"na"`
 	Nodes         map[NodeType][]string `json:"n"`
 	GroupWrappers []*GroupWrapper       `json:"o"`
+	// custom field
+	ActualValueMapData string `json:"actualValueMapData"`
+}
+
+type ActualValueGroup struct {
+	ID                string              `yaml:"id" json:"id"`
+	Text              string              `json:"description"`
+	ActualValueChecks []*ActualValueCheck `json:"actual_value_checks"`
+}
+
+type ActualValueCheck struct {
+	ID                 string            `yaml:"id" json:"id"`
+	Text               string            `json:"description"`
+	ActualValueNodeMap map[string]string `json:"actual_value_node_map"`
 }
 
 type skipConfig struct {
@@ -360,10 +377,53 @@ func (s *Summarizer) save() error {
 	jsonWriter := io.Writer(jsonFile)
 	encoder := json.NewEncoder(jsonWriter)
 	encoder.SetIndent("", " ")
+
+	avgroup := []*ActualValueGroup{}
+
+	for _, gw := range s.fullReport.GroupWrappers {
+		avchecks := []*ActualValueCheck{}
+		for _, cw := range gw.CheckWrappers {
+			avcheck := &ActualValueCheck{
+				ID:                 cw.ID,
+				Text:               cw.Text,
+				ActualValueNodeMap: cw.ActualValueNodeMap,
+			}
+			for k, v := range cw.ActualValueNodeMap {
+				avcheck.ActualValueNodeMap[k] = v
+			}
+
+			avchecks = append(avchecks, avcheck)
+			cw.ActualValueNodeMap = nil
+		}
+		avgroup = append(avgroup, &ActualValueGroup{
+			ID:                gw.ID,
+			Text:              gw.Text,
+			ActualValueChecks: avchecks,
+		})
+	}
+
+	jsonData, err := json.Marshal(avgroup)
+	if err != nil {
+		return fmt.Errorf("error encoding: %v", err)
+	}
+
+	var buf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buf)
+	_, err = gzipWriter.Write(jsonData)
+	if err != nil {
+		return fmt.Errorf("error writing compressed data: %v", err)
+	}
+	gzipWriter.Close()
+
+	compressedData := buf.Bytes()
+	base64Data := base64.StdEncoding.EncodeToString(compressedData)
+	s.fullReport.ActualValueMapData = base64Data
+
 	err = encoder.Encode(s.fullReport)
 	if err != nil {
 		return fmt.Errorf("error encoding: %v", err)
 	}
+
 	logrus.Infof("successfully saved report file: %v", outputFilePath)
 	return nil
 }
