@@ -54,15 +54,16 @@ type Group struct {
 }
 
 type Report struct {
-	Version       string                `json:"version"`
-	Total         int                   `json:"total"`
-	Pass          int                   `json:"pass"`
-	Fail          int                   `json:"fail"`
-	Skip          int                   `json:"skip"`
-	Warn          int                   `json:"warn"`
-	NotApplicable int                   `json:"notApplicable"`
-	Nodes         map[NodeType][]string `json:"nodes"`
-	Results       []*Group              `json:"results"`
+	Version            string                `json:"version"`
+	Total              int                   `json:"total"`
+	Pass               int                   `json:"pass"`
+	Fail               int                   `json:"fail"`
+	Skip               int                   `json:"skip"`
+	Warn               int                   `json:"warn"`
+	NotApplicable      int                   `json:"notApplicable"`
+	Nodes              map[NodeType][]string `json:"nodes"`
+	Results            []*Group              `json:"results"`
+	ActualValueMapData string                `json:"actualValueMapData"`
 }
 
 func nodeTypeMapper(nodeType summarizer.NodeType) NodeType {
@@ -146,7 +147,8 @@ func mapNodes(intNodes map[summarizer.NodeType][]string) map[NodeType][]string {
 
 func mapReport(internalReport *summarizer.SummarizedReport) (*Report, error) {
 	externalReport := &Report{
-		Results: []*Group{},
+		Results:            []*Group{},
+		ActualValueMapData: internalReport.ActualValueMapData,
 	}
 	for _, group := range internalReport.GroupWrappers {
 		extGroup := mapGroup(group)
