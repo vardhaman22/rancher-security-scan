@@ -1,6 +1,9 @@
 package summarizer
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -121,6 +124,20 @@ type SummarizedReport struct {
 	NotApplicable int                   `json:"na"`
 	Nodes         map[NodeType][]string `json:"n"`
 	GroupWrappers []*GroupWrapper       `json:"o"`
+	// ActualValueMapData is base64 encoded gzipped compressed avmap data of all checks
+	ActualValueMapData string `json:"actual_value_map_data"`
+}
+
+type ActualValueGroup struct {
+	ID                string              `yaml:"id" json:"id"`
+	Text              string              `json:"description"`
+	ActualValueChecks []*ActualValueCheck `json:"actual_value_checks"`
+}
+
+type ActualValueCheck struct {
+	ID                 string            `yaml:"id" json:"id"`
+	Text               string            `json:"description"`
+	ActualValueNodeMap map[string]string `json:"actual_value_node_map"`
 }
 
 type skipConfig struct {
@@ -360,10 +377,63 @@ func (s *Summarizer) save() error {
 	jsonWriter := io.Writer(jsonFile)
 	encoder := json.NewEncoder(jsonWriter)
 	encoder.SetIndent("", " ")
+
+	err = s.setfullReportActualValueMapData()
+	if err != nil {
+		return fmt.Errorf("failed to set actualValueMapData, err: %v", err)
+	}
+
+	avgroup := []*ActualValueGroup{}
+
+	for _, gw := range s.fullReport.GroupWrappers {
+		avchecks := []*ActualValueCheck{}
+		for _, cw := range gw.CheckWrappers {
+			avcheck := &ActualValueCheck{
+				ID:                 cw.ID,
+				Text:               cw.Text,
+				ActualValueNodeMap: cw.ActualValueNodeMap,
+			}
+			for k, v := range cw.ActualValueNodeMap {
+				avcheck.ActualValueNodeMap[k] = v
+			}
+
+			avchecks = append(avchecks, avcheck)
+			cw.ActualValueNodeMap = nil
+		}
+		avgroup = append(avgroup, &ActualValueGroup{
+			ID:                gw.ID,
+			Text:              gw.Text,
+			ActualValueChecks: avchecks,
+		})
+	}
+
+	jsonData, err := json.Marshal(avgroup)
+	if err != nil {
+		return fmt.Errorf("error encoding: %v", err)
+	}
+
+	var buf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buf)
+	defer func() {
+		if err := gzipWriter.Close(); err != nil {
+			logrus.Errorf("error closing gzip writer: %v", err)
+		}
+	}()
+
+	_, err = gzipWriter.Write(jsonData)
+	if err != nil {
+		return fmt.Errorf("error writing compressed data: %v", err)
+	}
+
+	compressedData := buf.Bytes()
+	base64Data := base64.StdEncoding.EncodeToString(compressedData)
+	s.fullReport.ActualValueMapData = base64Data
+
 	err = encoder.Encode(s.fullReport)
 	if err != nil {
 		return fmt.Errorf("error encoding: %v", err)
 	}
+
 	logrus.Infof("successfully saved report file: %v", outputFilePath)
 	return nil
 }
@@ -777,4 +847,63 @@ func printCheck(check *kb.Check) {
 
 func printCheckWrapper(cw *CheckWrapper) {
 	logrus.Debugf("checkWrapper: %+v", cw)
+}
+
+func (s *Summarizer) setfullReportActualValueMapData() error {
+
+	avgroups := mapGroupWrappersToActualValueGroups(s.fullReport.GroupWrappers)
+
+	jsonData, err := json.Marshal(avgroups)
+	if err != nil {
+		return fmt.Errorf("error encoding avgroups: %v", err)
+	}
+
+	var buf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buf)
+
+	_, err = gzipWriter.Write(jsonData)
+	if err != nil {
+		return fmt.Errorf("error writing compressed data: %v", err)
+	}
+
+	if err := gzipWriter.Close(); err != nil {
+		return fmt.Errorf("error closing gzip writer: %v", err)
+	}
+
+	compressedData := buf.Bytes()
+	base64Data := base64.StdEncoding.EncodeToString(compressedData)
+	s.fullReport.ActualValueMapData = base64Data
+
+	return nil
+}
+
+func mapGroupWrappersToActualValueGroups(grpWrappers []*GroupWrapper) []*ActualValueGroup {
+	avgroups := make([]*ActualValueGroup, len(grpWrappers))
+
+	for gwIdx, gw := range grpWrappers {
+		avchecks := make([]*ActualValueCheck, len(gw.CheckWrappers))
+
+		for cwIdx, cw := range gw.CheckWrappers {
+
+			avchecks[cwIdx] = &ActualValueCheck{
+				ID:                 cw.ID,
+				Text:               cw.Text,
+				ActualValueNodeMap: make(map[string]string, len(cw.ActualValueNodeMap)),
+			}
+
+			for k, v := range cw.ActualValueNodeMap {
+				avchecks[cwIdx].ActualValueNodeMap[k] = v
+			}
+
+			cw.ActualValueNodeMap = nil
+		}
+
+		avgroups[gwIdx] = &ActualValueGroup{
+			ID:                gw.ID,
+			Text:              gw.Text,
+			ActualValueChecks: avchecks,
+		}
+	}
+
+	return avgroups
 }
