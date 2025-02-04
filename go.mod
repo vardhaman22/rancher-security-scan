@@ -4,6 +4,8 @@ go 1.23.4
 
 toolchain go1.23.5
 
+replace k8s.io/client-go => k8s.io/client-go v0.31.5
+
 require (
 	github.com/aquasecurity/kube-bench v0.10.0
 	github.com/sirupsen/logrus v1.9.3
